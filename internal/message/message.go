@@ -36,3 +36,14 @@ func FromRedis(msg *redis.Message) *Message {
 	}
 	return m
 }
+
+func FromStr(payload string) *Message {
+	m := &Message{}	
+	err := json.Unmarshal([]byte(payload), m)
+	if err != nil {
+		log.Println(err)
+		return nil
+	}
+	return m
+
+}

@@ -17,6 +17,8 @@ type Client struct {
 
 	// The websocket connection.
 	conn *websocket.Conn
+
+	msg chan *message.Message
 }
 
 func(c *Client) OnMessageRecieve(m *message.Message) ([]byte, bool) {

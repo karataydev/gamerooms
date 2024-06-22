@@ -3,12 +3,12 @@ package game
 import (
 	"context"
 	"fmt"
+
 	//"time"
 
 	"github.com/google/uuid"
 	"github.com/karataymarufemre/gamerooms/internal/event"
 	"github.com/karataymarufemre/gamerooms/internal/message"
-	"github.com/redis/go-redis/v9"
 )
 
 
@@ -19,26 +19,35 @@ type Room interface {
 type GameRoom struct {
 	id string
 	players map[string]*Player
-	rdb *redis.Client
+	sendFunc func(context.Context, string, *message.Message)
+	msg chan *message.Message
 }
 
 type PlayerState int
+type PlayerRole int
 
 const (
-	NOT_READY PlayerState = iota
-	READY
+	NotReady PlayerState = iota
+	Ready
+)
+
+const (
+	Admin PlayerRole = iota
+	Normal
 )
 
 type Player struct {
 	id string
 	state PlayerState
+	role  PlayerRole
 }
 
-func NewRoom(rdb *redis.Client) *GameRoom {
+func NewRoom(sendFunc func(context.Context, string, *message.Message)) *GameRoom {
 	return &GameRoom{
 		id: uuid.NewString(),
 		players: make(map[string]*Player),
-		rdb: rdb,
+		sendFunc: sendFunc,
+		msg: make(chan *message.Message),
 	}
 }
 
@@ -47,24 +56,25 @@ func (r *GameRoom) Id() string {
 }
 
 func (r *GameRoom) AddPlayer(clientId string) {
-	r.players[clientId] = &Player{id: clientId, state: NOT_READY}
+	r.players[clientId] = &Player{id: clientId, state: NotReady}
 }
 
-func (r *GameRoom) Run() {
-	ctx := context.Background()
-	subs := r.rdb.Subscribe(ctx, r.id)
+func (r *GameRoom) sendToClient(ctx context.Context, clientId string, msg *message.Message) {
+	r.sendFunc(ctx, clientId, msg)
+}
+
+func (r *GameRoom) Loop(ctx context.Context) {
 	// ticker := time.NewTicker(pingPeriod)
 	// wait everyone to be ready
 	for !r.isAllPlayersReady() {
 		select {
-		case msg, _ := <- subs.Channel():
-			m := message.FromRedis(msg)
+		case m, _ := <- r.msg:
 			fmt.Println(m)
 			switch m.Event {
 			case event.Connect:
 				r.AddPlayer(m.From)
 			case event.Ready:
-				r.players[m.From].state = READY
+				r.players[m.From].state = Ready
 			}
 		}
 	}
@@ -75,13 +85,15 @@ func (r *GameRoom) Run() {
 	}
 }
 
+
+
 func (r *GameRoom) isAllPlayersReady() bool {
 	isAllReady := true
 	if len(r.players) == 0 {
 		return false
 	}
 	for _, p := range r.players {
-		if p.state != READY {
+		if p.state != Ready {
 			isAllReady = false
 			break
 		}

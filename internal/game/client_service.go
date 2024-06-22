@@ -44,6 +44,7 @@ func (c *RedisClientService) Connect(conn *websocket.Conn, ctx context.Context, 
 		id: userId,
 		roomId: roomId,
 		conn: conn,
+		msg: make(chan *message.Message),
 	}
 	go c.Subscribe(client, conn, ctx)
 	go c.Publish(client, conn, ctx)
@@ -51,7 +52,7 @@ func (c *RedisClientService) Connect(conn *websocket.Conn, ctx context.Context, 
 
 // listen redis pub sub and call client On Message Recieve
 func (c *RedisClientService) Subscribe(client *Client, conn *websocket.Conn, ctx context.Context) {
-	subs := c.rdb.Subscribe(ctx, client.roomId)
+	go c.SubscribeQueue(client, conn, ctx)
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
@@ -59,27 +60,14 @@ func (c *RedisClientService) Subscribe(client *Client, conn *websocket.Conn, ctx
 	}()
 	for {
 		select {
-		case msg, ok := <- subs.Channel():
+		case msg, ok := <- client.msg:
 			conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				// The hub closed the channel.
 				conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			m := message.FromRedis(msg)
-			message, shouldWrite := client.OnMessageRecieve(m)
-
-			if shouldWrite {
-				w, err := conn.NextWriter(websocket.TextMessage)
-				if err != nil {
-					return
-				}
-				w.Write(message)
-				
-				if err := w.Close(); err != nil {
-					return
-				}
-			}
+			log.Printf("Subs: %+v", *msg)
 
 		case <- ticker.C:
 			conn.SetWriteDeadline(time.Now().Add(writeWait))
@@ -88,6 +76,15 @@ func (c *RedisClientService) Subscribe(client *Client, conn *websocket.Conn, ctx
 				return
 			}
 		}
+	}
+}
+
+func (c *RedisClientService) SubscribeQueue(client *Client, conn *websocket.Conn, ctx context.Context) {
+	for {
+		strSlice, _ := c.rdb.BRPop(ctx, 0, client.id).Result()
+		log.Printf("message recieved from queue for client %s: %s", strSlice[0], strSlice[1])
+		m := message.FromStr(strSlice[1])
+		client.msg <- m
 	}
 }
 
@@ -109,7 +106,8 @@ func (c *RedisClientService) Publish(client *Client, conn *websocket.Conn, ctx c
 		}
 		newMsg := client.FromClient(message)
 		content, err := json.Marshal(newMsg)
-		if err = c.rdb.Publish(ctx, client.roomId, content).Err(); err != nil {
+		log.Println(newMsg)
+		if err = c.rdb.LPush(ctx, client.roomId, content).Err(); err != nil {
 			log.Printf("error: %v", err)
 		}
 	}
