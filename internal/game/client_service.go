@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/karataymarufemre/gamerooms/internal/event"
 	"github.com/karataymarufemre/gamerooms/internal/message"
 	"github.com/redis/go-redis/v9"
 )
@@ -46,6 +47,15 @@ func (c *RedisClientService) Connect(conn *websocket.Conn, ctx context.Context, 
 		conn: conn,
 		msg: make(chan *message.Message),
 	}
+
+	err := c.rdb.Get(ctx, "exists" + roomId).Err()
+	if err != nil {
+		log.Printf("room does not exist, roomId: %s", roomId)
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "room does not exist"))
+	}
+	connectMsg := &message.Message{From: userId, Role: message.PLAYER, Event: event.Connect}
+	err = c.rdb.LPush(ctx, roomId, connectMsg.ToJson()).Err()
+	conn.WriteMessage(websocket.TextMessage, []byte("Connected"))
 	go c.Subscribe(client, conn, ctx)
 	go c.Publish(client, conn, ctx)
 }
@@ -67,8 +77,7 @@ func (c *RedisClientService) Subscribe(client *Client, conn *websocket.Conn, ctx
 				conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			log.Printf("Subs: %+v", *msg)
-
+			conn.WriteMessage(websocket.TextMessage, msg.ToJson())
 		case <- ticker.C:
 			conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {

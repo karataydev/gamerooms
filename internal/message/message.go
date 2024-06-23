@@ -24,6 +24,7 @@ type Message struct {
 	Role RoomRole
 	Content string
 	Event event.Event
+	Data *json.RawMessage
 }
 
 
@@ -46,4 +47,12 @@ func FromStr(payload string) *Message {
 	}
 	return m
 
+}
+
+func (m *Message) ToJson() []byte {
+	json, err := json.Marshal(m)
+	if err != nil {
+		log.Printf("could not convert message to json. message: %v", m)
+	}
+	return json
 }

@@ -29,7 +29,7 @@ func NewApiHandler(clientSrvice game.ClientService, roomService game.RoomService
 
 func (h *ApiHandler) ServeMux() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws/{roomId}/{userId}", h.serveWebsocket)
+	mux.HandleFunc("/ws/connect", h.serveWebsocket)
 	mux.HandleFunc("/create", h.newRoom)
 	return mux
 }
@@ -37,8 +37,8 @@ func (h *ApiHandler) ServeMux() *http.ServeMux {
 
 func (h *ApiHandler) serveWebsocket(w http.ResponseWriter, r *http.Request)  {
 	ctx := context.Background()
-	roomId := r.PathValue("roomId")
-	userId := r.PathValue("userId")
+	roomId := r.URL.Query().Get("roomId")
+	userId := r.URL.Query().Get("userId")
 	log.Printf("user %s connecting to room %s", userId, roomId)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
